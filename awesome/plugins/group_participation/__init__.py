@@ -10,6 +10,7 @@ from nonebot.params import CommandArg
 
 from Services import deepseek_api
 from Services.group_participation import ParticipationState
+from Services.model_router import complete
 from awesome.adminControl import get_privilege, group_control
 from awesome.Constants import group_permission
 from awesome.Constants.user_permission import BANNED, OWNER
@@ -120,8 +121,8 @@ async def consider(bot, group, state):
             if state.version != version or not enabled(group) or not state.reserve(monotonic()):
                 return
             logger.info(f'Autonomous chat candidate: group={group}, score={score}, factors={reasons}')
-            completion = await asyncio.wait_for(deepseek_api.client.chat.completions.create(
-                model='deepseek-flash', temperature=0.5, max_tokens=512,
+            completion = await asyncio.wait_for(complete(deepseek_api.client,
+                temperature=0.5, max_tokens=512,
                 response_format={'type': 'json_object'},
                 messages=[
                     {'role': 'system', 'content': '你是群聊中的中文聊天助手。根据下方近期聊天判断是否值得自然插一句。'

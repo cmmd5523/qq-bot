@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import re
+import time
 
 import nonebot
 from dotenv import load_dotenv
@@ -92,3 +93,22 @@ async def clear_context(body: dict):
         if gid in p.TASKS:
             p.TASKS[gid].cancel()
     return {'ok': True}
+
+
+@app.post('/internal/admin/models/test', dependencies=[Depends(authorize)])
+async def test_model(body: dict):
+    from Services.model_router import complete, PROVIDERS
+    provider = body.get('provider')
+    if provider not in PROVIDERS:
+        raise HTTPException(400, 'unsupported provider')
+    started = time.monotonic()
+    try:
+        result = await asyncio.wait_for(complete(deepseek_api.client, provider=provider,
+            messages=[{'role': 'user', 'content': '只回复OK。'}], max_tokens=64), timeout=25)
+        if not result.choices[0].message.content:
+            raise ValueError('empty response')
+        return {'ok': True, 'provider': provider, 'model': PROVIDERS[provider]['model'],
+                'elapsed': round(time.monotonic() - started, 2)}
+    except Exception as error:
+        status = getattr(error, 'status_code', None)
+        return {'ok': False, 'error': type(error).__name__ + (f' ({status})' if status else '')}

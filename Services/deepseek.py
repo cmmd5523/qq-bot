@@ -49,6 +49,7 @@ from config import (
     SUPER_USER,
 )
 from model.common_model import Status
+from Services.model_router import complete, selected_provider
 from util.helper_util import construct_message_chain
 
 
@@ -74,8 +75,7 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
     # noinspection PyTypeChecker
     async def _judge_llm_raw(self, user_text: str) -> str:
         try:
-            response = await self.client.chat.completions.create(
-                model=self.web_search_judge_model_name,
+            response = await complete(self.client,
                 messages=[
                     {"role": "system", "content": self._judge_instructions},
                     {"role": "user", "content": user_text}
@@ -356,8 +356,8 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
 
     async def _invoke_deepseek(self, context_data, _model_name, _group_id):
         try:
-            response = await self.client.chat.completions.create(
-                model="deepseek-flash", messages=context_data, temperature=.5, stream=False
+            response = await complete(self.client,
+                messages=context_data, temperature=.5, stream=False
             )
 
             content = response.choices[0].message.content
@@ -374,10 +374,13 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
                 prompt_cache_hit_tokens=prompt_cache_hit_tokens,
             )
 
-            logger.info(
-                f"DeepSeek usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}; "
-                f"prompt_cache_hit_tokens={prompt_cache_hit_tokens}; cost≈{cost_rmb:.6f} RMB"
-            )
+            if str(getattr(response, 'model', '')).startswith('kimi'):
+                logger.info(f'Kimi usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}; cost=unpriced')
+            else:
+                logger.info(
+                    f"DeepSeek usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}; "
+                    f"prompt_cache_hit_tokens={prompt_cache_hit_tokens}; cost≈{cost_rmb:.6f} RMB"
+                )
 
             return content
         except (RateLimitError, APITimeoutError) as err:

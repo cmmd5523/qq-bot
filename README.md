@@ -60,3 +60,9 @@ Telegram默认拒绝未授权用户。仅`.env`中`TELEGRAM_ALLOWED_USER_IDS`列
 新增独立管理网页：状态与服务控制、QQ/TG接入与白名单、群组自主参与、记忆、提示词与凭据、用量、脱敏日志、账号审计和配置备份恢复。默认仅回环监听，通过自己的LAN隧道访问。部署和安全边界见[admin/README.md](admin/README.md)。
 
 QQ私聊现在直接发送普通文字即可对话，无需唤醒词；已有命令、语音处理和封禁规则保留。群聊仍使用@/回复/按群开启的自主参与，避免全群每条消息均触发。
+
+## 模型选择
+
+后台新增模型选择页：DeepSeek / deepseek-flash、Kimi / kimi-k2.6（https://api.moonshot.cn/v1）。在私有config.py中填写KIMI_API_KEY，可在后台替换，接口不回显密钥。页面支持独立连接测试和实时设为默认；初始默认保持DeepSeek。文本对话、辅助判断与自主参与跟随选择，搜索/抓取工具仍使用原服务。
+
+Kimi使用关闭思考模式，以匹配当前只保存最终回复的对话格式；不会把推理内容错误拼入历史。Kimi Token及请求数纳入用量，价格未配置时明确标记未计价，不套用DeepSeek单价。模型选择保存在忽略的config/model-routing.json，并纳入私有配置备份。

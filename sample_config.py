@@ -71,3 +71,6 @@ COMMAND_START = {'/', '!', '／', '！', '#'}
 
 # 选填：Buff cookies/session（如使用到相关功能再填）
 BUFF_SESSION_ID = ''
+
+# Kimi（可选，仅在私有config.py填写）
+KIMI_API_KEY = ''

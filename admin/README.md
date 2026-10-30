@@ -26,3 +26,9 @@
 ## 检查
 
 `python -m unittest discover -s tests -p test_admin.py`验证登录、CSRF、只读权限、会话撤销、限速、操作白名单、密钥脱敏、备份恢复和SQL参数绑定。测试使用临时目录，不控制生产服务。
+
+## 模型选择
+
+后台新增模型选择页：DeepSeek / deepseek-flash、Kimi / kimi-k2.6（https://api.moonshot.cn/v1）。在私有config.py中填写KIMI_API_KEY，可在后台替换，接口不回显密钥。页面支持独立连接测试和实时设为默认；初始默认保持DeepSeek。文本对话、辅助判断与自主参与跟随选择，搜索/抓取工具仍使用原服务。
+
+Kimi使用关闭思考模式，以匹配当前只保存最终回复的对话格式；不会把推理内容错误拼入历史。Kimi Token及请求数纳入用量，价格未配置时明确标记未计价，不套用DeepSeek单价。模型选择保存在忽略的config/model-routing.json，并纳入私有配置备份。

@@ -20,12 +20,21 @@ def record(model, response, elapsed, error=None):
     cost = (cached * DEEPSEEK_PRICE_INPUT_PER_1M_CACHE_HIT_RMB
             + (prompt - cached) * DEEPSEEK_PRICE_INPUT_PER_1M_RMB
             + output * DEEPSEEK_PRICE_OUTPUT_PER_1M_RMB) / 1_000_000
+    provider = 'kimi' if str(model).startswith('kimi') else 'deepseek'
+    priced = provider == 'deepseek'
+    if not priced:
+        cost = None
     with sqlite3.connect(DB, timeout=3) as db:
         db.execute('''CREATE TABLE IF NOT EXISTS requests (
             id INTEGER PRIMARY KEY, at REAL, model TEXT, prompt INTEGER,
             output INTEGER, cached INTEGER, cost REAL, elapsed REAL, error TEXT)''')
-        db.execute('INSERT INTO requests(at,model,prompt,output,cached,cost,elapsed,error) VALUES(?,?,?,?,?,?,?,?)',
-                   (time.time(), str(model)[:80], prompt, output, cached, cost, elapsed, error))
+        columns = {row[1] for row in db.execute('PRAGMA table_info(requests)')}
+        if 'provider' not in columns:
+            db.execute("ALTER TABLE requests ADD COLUMN provider TEXT DEFAULT 'deepseek'")
+        if 'pricing_known' not in columns:
+            db.execute('ALTER TABLE requests ADD COLUMN pricing_known INTEGER DEFAULT 1')
+        db.execute('INSERT INTO requests(at,model,prompt,output,cached,cost,elapsed,error,provider,pricing_known) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                   (time.time(), str(model)[:80], prompt, output, cached, cost, elapsed, error, provider, int(priced)))
 
 
 def instrument(client):

@@ -191,8 +191,8 @@ def logout(request: Request):
     return response
 
 
-READ_ACTIONS = {'status', 'config', 'groups', 'memories', 'prompt', 'qr', 'backup_list', 'logs'}
-WRITE_ACTIONS = {'service', 'telegram', 'keys', 'group', 'clear_context', 'memory_delete', 'memory_update', 'backup_create', 'backup_restore'}
+READ_ACTIONS = {'status', 'config', 'models', 'groups', 'memories', 'prompt', 'qr', 'backup_list', 'logs'}
+WRITE_ACTIONS = {'service', 'telegram', 'keys', 'model_select', 'model_test', 'group', 'clear_context', 'memory_delete', 'memory_update', 'backup_create', 'backup_restore'}
 
 
 @app.get('/api/data/{action}')

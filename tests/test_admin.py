@@ -156,6 +156,14 @@ class HelperBoundaryTests(unittest.TestCase):
         with sqlite3.connect(folder / 'meme_database.db') as db:
             self.assertEqual(db.execute('SELECT content,is_approved FROM memories').fetchone(), ("new'; DROP TABLE memories;--", 1))
 
+    def test_model_selection_is_fixed_and_missing_key_rejected(self):
+        with self.assertRaises(ValueError):
+            self.helper.do('model_select', {'provider': 'https://evil.invalid'})
+        with self.assertRaises(ValueError):
+            self.helper.do('model_select', {'provider': 'kimi'})
+        self.helper.do('model_select', {'provider': 'deepseek'})
+        self.assertEqual(self.helper.do('models', {})['selected'], {'provider': 'deepseek', 'model': 'deepseek-flash'})
+
 
 if __name__ == '__main__':
     unittest.main()

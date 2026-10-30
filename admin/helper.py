@@ -19,9 +19,13 @@ import zipfile
 ROOT = Path('/opt/qq-bot-deploy')
 APP = ROOT / 'app'
 SERVICES = {'bot': 'qq-bot-deploy_bot_1', 'napcat': 'qq-bot-deploy_napcat_1'}
-KEYS = ('DEEPSEEK_API_KEY', 'OPEN_API_KEY', 'XAI_API_KEY', 'TAVILY_API_KEY',
+KEYS = ('DEEPSEEK_API_KEY', 'KIMI_API_KEY', 'OPEN_API_KEY', 'XAI_API_KEY', 'TAVILY_API_KEY',
         'PIXIV_REFRESH_TOKEN', 'BILI_SESS_DATA', 'SAUCE_API_KEY', 'DISCORD_AUTH', 'BUFF_SESSION_ID')
-BACKUP_FILES = ('.env', 'config.py', 'system_prompt.md', 'config/group-participation.json')
+BACKUP_FILES = ('.env', 'config.py', 'system_prompt.md', 'config/group-participation.json', 'config/model-routing.json')
+MODELS = {
+    'deepseek': {'name': 'DeepSeek', 'model': 'deepseek-flash', 'base_url': 'https://api.deepseek.com', 'key': 'DEEPSEEK_API_KEY'},
+    'kimi': {'name': 'Kimi', 'model': 'kimi-k2.6', 'base_url': 'https://api.moonshot.cn/v1', 'key': 'KIMI_API_KEY'},
+}
 
 
 def run(args, timeout=20):
@@ -90,7 +94,7 @@ def bridge(path, body=None):
     request = urllib.request.Request('http://127.0.0.1:5700/internal/admin/' + path,
         data=json.dumps(body).encode() if body is not None else None,
         headers={'X-Admin-Token': token, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(request, timeout=12) as response:
+    with urllib.request.urlopen(request, timeout=35 if path == 'models/test' else 12) as response:
         return json.load(response)
 
 
@@ -115,16 +119,18 @@ def inspect():
 
 def metrics():
     path = APP / 'data/db/admin_metrics.db'
-    empty = {'requests': 0, 'errors': 0, 'tokens': 0, 'cost': 0, 'avg_latency': 0, 'daily': []}
+    empty = {'requests': 0, 'errors': 0, 'tokens': 0, 'cost': 0, 'avg_latency': 0, 'unpriced': 0, 'daily': []}
     if not path.exists():
         return empty
     with sqlite3.connect(path) as db:
         if not db.execute("SELECT 1 FROM sqlite_master WHERE name='requests'").fetchone():
             return empty
-        row = db.execute('SELECT count(*),sum(error IS NOT NULL),sum(prompt+output),sum(cost),avg(elapsed) FROM requests WHERE at>?', (time.time() - 86400,)).fetchone()
-        daily = db.execute("SELECT date(at,'unixepoch','+8 hours'),count(*),sum(prompt+output),sum(cost) FROM requests WHERE at>? GROUP BY 1 ORDER BY 1", (time.time() - 7 * 86400,)).fetchall()
-    return dict(zip(['requests', 'errors', 'tokens', 'cost', 'avg_latency'], [v or 0 for v in row]),
-                daily=[{'day': d, 'requests': r, 'tokens': t, 'cost': c} for d, r, t, c in daily])
+        columns = {r[1] for r in db.execute('PRAGMA table_info(requests)')}
+        unknown = 'sum(pricing_known=0)' if 'pricing_known' in columns else '0'
+        row = db.execute('SELECT count(*),sum(error IS NOT NULL),sum(prompt+output),sum(cost),avg(elapsed),'+unknown+' FROM requests WHERE at>?', (time.time() - 86400,)).fetchone()
+        daily = db.execute("SELECT date(at,'unixepoch','+8 hours'),count(*),sum(prompt+output),sum(cost),"+unknown+" FROM requests WHERE at>? GROUP BY 1 ORDER BY 1", (time.time() - 7 * 86400,)).fetchall()
+    return dict(zip(['requests', 'errors', 'tokens', 'cost', 'avg_latency', 'unpriced'], [v or 0 for v in row]),
+                daily=[{'day': d, 'requests': r, 'tokens': t, 'cost': c or 0, 'unpriced': u or 0} for d, r, t, c, u in daily])
 
 
 def config_view():
@@ -135,6 +141,23 @@ def config_view():
 
 
 def do(action, body):
+    if action == 'models':
+        path = APP / 'config/model-routing.json'
+        selected = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'provider': 'deepseek', 'model': 'deepseek-flash'}
+        return {'selected': selected, 'models': [dict(provider=p, name=item['name'], model=item['model'],
+                    base_url=item['base_url'], configured=bool(literals().get(item['key'])),
+                    pricing_known=p == 'deepseek') for p, item in MODELS.items()]}
+    if action in {'model_select', 'model_test'}:
+        provider = body.get('provider')
+        if not isinstance(provider, str) or provider not in MODELS:
+            raise ValueError('未知模型提供商')
+        if not literals().get(MODELS[provider]['key']):
+            raise ValueError('请先在模型配置中保存该提供商密钥')
+        if action == 'model_test':
+            return bridge('models/test', {'provider': provider})
+        selected = {'provider': provider, 'model': MODELS[provider]['model']}
+        atomic(APP / 'config/model-routing.json', json.dumps(selected))
+        return {'ok': True, 'selected': selected}
     if action == 'status':
         try:
             runtime = bridge('status')
@@ -296,6 +319,10 @@ def do(action, body):
         if 'config/group-participation.json' in values:
             if not isinstance(json.loads(values['config/group-participation.json']), dict):
                 raise ValueError('群配置不合法')
+        if 'config/model-routing.json' in values:
+            selected = json.loads(values['config/model-routing.json'])
+            if not isinstance(selected, dict) or selected.get('provider') not in MODELS or selected.get('model') != MODELS[selected['provider']]['model']:
+                raise ValueError('模型配置不合法')
         do('backup_create', {})
         run(['docker', 'stop', SERVICES['bot']])
         try:
