@@ -1,0 +1,11 @@
+-r requirements.txt
+nonebot2[fastapi]>=2.4.4
+lxml_html_clean
+aiosqlite
+async-lru
+setuptools
+twitch-dl
+faster-whisper
+edge-tts
+av<19
+opencc-python-reimplemented
