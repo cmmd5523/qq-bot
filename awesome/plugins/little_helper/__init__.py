@@ -202,6 +202,25 @@ async def reply_to_mention(event: GroupMessageEvent, matcher: Matcher):
     await get_chatgpt_response(event, matcher, event.get_message())
 
 
+async def _is_plain_private(event: GroupMessageEvent | PrivateMessageEvent) -> bool:
+    if not isinstance(event, PrivateMessageEvent):
+        return False
+    text = event.get_plaintext().strip()
+    return bool(text) and not text.startswith(('/', '!', '／', '！', '#'))
+
+
+private_chat = on_message(rule=_is_plain_private, priority=11, block=True)
+
+
+@private_chat.handle()
+async def reply_to_private(event: PrivateMessageEvent, matcher: Matcher):
+    from awesome.adminControl import get_privilege
+    from awesome.Constants.user_permission import BANNED
+    if get_privilege(event.get_user_id(), BANNED):
+        return
+    await get_chatgpt_response(event, matcher, event.get_message())
+
+
 smash_cmd = on_command('smash')
 
 
