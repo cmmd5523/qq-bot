@@ -49,7 +49,7 @@ from config import (
     SUPER_USER,
 )
 from model.common_model import Status
-from Services.model_router import complete, selected_provider
+from Services.model_router import complete, selected_provider, PROVIDERS, ModelAnswer
 from util.helper_util import construct_message_chain
 
 
@@ -76,6 +76,7 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
     async def _judge_llm_raw(self, user_text: str) -> str:
         try:
             response = await complete(self.client,
+                thinking=False,
                 messages=[
                     {"role": "system", "content": self._judge_instructions},
                     {"role": "user", "content": user_text}
@@ -198,10 +199,12 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
             logger.error(f"Failed to generate/send search result image. err={err}")
 
     async def _invoke_model(self, message: ChatGPTRequestMessage) -> str:
+        if message.media_parts or message.has_image or message.force_no_web_search:
+            return await self._invoke_chat_model(message)
         if not message.force_no_web_search and ('https://' in message.message or 'http://' in message.message):
-            return await self._invoke_with_tavily_search(message)
+            return await self._invoke_with_deepseek_search(message)
         if message.is_web_search_used:
-            return await self._invoke_with_tavily_search(message)
+            return await self._invoke_with_deepseek_search(message)
 
         prejudge = self._prejudge_need_web_search(message.message)
         logger.info(
@@ -212,7 +215,7 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
             return await self._invoke_chat_model(message)
 
         intervals = -5
-        context_data = self._construct_openai_message_context(message, intervals)
+        context_data = [self._normalize_system_context(message.context)] + self._get_conversation_context_by_group(message.group_id, intervals)
         _, non_system_messages = self._extract_system_and_non_system(context_data)
         history_text = self._messages_to_plain_input(non_system_messages)
         judge_input = self._build_web_search_judge_input(history_text, message.message)
@@ -222,11 +225,11 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
 
         if need_search:
             q = (query or "").strip() or message.message.strip()[:200]
-            return await self._invoke_with_tavily_search(message, query=q)
+            return await self._invoke_with_deepseek_search(message, query=q)
 
         return await self._invoke_chat_model(message)
 
-    async def _invoke_with_tavily_search(self, message: ChatGPTRequestMessage, query: str = "") -> str:
+    async def _invoke_with_deepseek_search(self, message: ChatGPTRequestMessage, query: str = "") -> str:
         from re import search
         url_match = search(r'https?://[^\s<>]+', message.message)
         if url_match:
@@ -257,8 +260,9 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
         )
 
     async def chat(self, message: ChatGPTRequestMessage) -> Status:
-        if message.has_image:
-            raise NotImplementedError("DeepSeekAPI does not support image inputs yet.")
+        provider = selected_provider()
+        if any(part.get('type') == 'video_url' for part in message.media_parts or []) and not PROVIDERS[provider]['video']:
+            return Status(False, '当前DeepSeek模型支持图片，不支持视频；请切换Kimi。')
 
         if message.should_filter:
             message_status = self._sanity_check(message)
@@ -268,7 +272,7 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
         logger.info(f'Message parsed in: {message.message}')
 
         model_response = await self._invoke_model(message)
-        return Status(True, model_response)
+        return Status(bool(model_response), model_response or '模型未返回完整答案，请稍后重试或关闭思考模式。')
 
     @staticmethod
     def _safe_int(value, default: int = 0) -> int:
@@ -382,7 +386,8 @@ class DeepSeekAPI(ChatGPTBaseAPI, WebSearchJudgeMixin):
                     f"prompt_cache_hit_tokens={prompt_cache_hit_tokens}; cost≈{cost_rmb:.6f} RMB"
                 )
 
-            return content
+            return ModelAnswer(content or '', getattr(response.choices[0].message, 'reasoning_content', '') or '',
+                               'kimi' if str(getattr(response, 'model', '')).startswith('kimi') else 'deepseek')
         except (RateLimitError, APITimeoutError) as err:
             logger.error(f"DeepSeek request timed out/rate-limited: {err}")
         except (APIConnectionError, APIError) as err:

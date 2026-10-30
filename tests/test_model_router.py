@@ -43,8 +43,28 @@ class ModelRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deepseek_keeps_existing_client(self):
         fallback = client()
-        await self.router.complete(fallback, messages=[], temperature=.5)
-        fallback.chat.completions.create.assert_awaited_once_with(model='deepseek-flash', messages=[], temperature=.5)
+        await self.router.complete(fallback, messages=[], temperature=.5, thinking=False)
+        fallback.chat.completions.create.assert_awaited_once_with(model='deepseek-flash', messages=[], temperature=.5,
+            extra_body={'thinking': {'type': 'disabled'}}, timeout=45)
+
+    async def test_thinking_mode_filters_temperature_and_reasoning(self):
+        fallback = client()
+        await self.router.complete(fallback, messages=[{'role': 'assistant', 'content': 'answer', 'reasoning_content': 'private reasoning'}], temperature=.5)
+        values = fallback.chat.completions.create.call_args.kwargs
+        self.assertNotIn('temperature', values)
+        self.assertNotIn('reasoning_content', values['messages'][0])
+        self.assertEqual(values['extra_body']['thinking']['type'], 'enabled')
+
+    async def test_kimi_thinking_can_be_enabled_and_preserved(self):
+        kimi = client()
+        self.router._CLIENTS['kimi'] = kimi
+        self.router.ROUTING_PATH.write_text(json.dumps({'provider': 'kimi', 'model': 'kimi-k2.6', 'thinking_by_provider': {'kimi': True}}))
+        with patch.dict(sys.modules, {'config': SimpleNamespace(KIMI_API_KEY='test-placeholder')}):
+            await self.router.complete(client(), messages=[{'role': 'assistant', 'content': 'answer', 'reasoning_content': 'previous reasoning'}])
+        values = kimi.chat.completions.create.call_args.kwargs
+        self.assertEqual(values['temperature'], 1.)
+        self.assertEqual(values['messages'][0]['reasoning_content'], 'previous reasoning')
+        self.assertEqual(values['extra_body']['thinking']['type'], 'enabled')
 
     async def test_kimi_selection_uses_exact_model_and_instant_mode(self):
         kimi, fallback = client(), client()

@@ -4,7 +4,7 @@ from random import random
 
 from aiocache import cached
 from aiocache.serializers import PickleSerializer
-from nonebot import on_command, on_message, on_startswith
+from nonebot import get_bot, on_command, on_message, on_startswith
 from nonebot.rule import to_me
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, PrivateMessageEvent, Message, MessageSegment, ActionFailed
 from nonebot.adapters.onebot.v11.helpers import extract_image_urls
@@ -122,19 +122,29 @@ hi_lingye_cmd = on_command('聊天助手', block=True)
 
 @hi_lingye_cmd.handle()
 async def get_chatgpt_response(event: GroupMessageEvent | PrivateMessageEvent, matcher: Matcher, args: Message = CommandArg()):
-    if not args.extract_plain_text():
+    from Services.media_input import qq_parts
+    from Services.model_router import selected_provider
+    from awesome.adminControl import get_privilege
+    from awesome.Constants.user_permission import BANNED
+    if get_privilege(event.get_user_id(), BANNED):
+        return
+    user_input = args.extract_plain_text().strip()
+    attachment_message = args
+    if not any(s.type in {'image', 'video'} for s in args) and getattr(event, 'reply', None):
+        attachment_message = event.reply.message
+    try:
+        media = await qq_parts(get_bot(str(event.self_id)), attachment_message, selected_provider()) if any(
+            s.type in {'image', 'video'} for s in attachment_message) else []
+    except ValueError as error:
+        await matcher.finish(str(error))
+    if not user_input and not media:
         await matcher.finish('在，怎么了？')
-
-    user_input = args.extract_plain_text()
+    if not user_input:
+        user_input = '请描述并分析这段视频。' if any(p['type'] == 'video_url' for p in media) else '请描述并分析这张图片。'
 
     group_id = (f'group:{event.group_id}' if isinstance(event, GroupMessageEvent)
                 else f'private:{event.user_id}')
     user_id = event.get_user_id()
-
-    has_image = extract_image_urls(args)
-    downloaded_image = None
-    if has_image:
-        await matcher.finish('当前 DeepSeek 对话仅支持文字，请用文字描述图片内容。')
 
     try:
         logger.info(f'Requesting information: user id: [{user_id}], group id: [{group_id}], message: {user_input}')
@@ -144,12 +154,11 @@ async def get_chatgpt_response(event: GroupMessageEvent | PrivateMessageEvent, m
                 is_chat=True,
                 context=get_system_message(),
                 group_id=str(group_id),
-                has_image=len(has_image) > 0,
-                image_path=downloaded_image
+                media_parts=media
             )
         )
         if not chatgpt_message.is_success:
-            await matcher.finish('稍等一下再问！')
+            await matcher.finish(str(chatgpt_message.message or '稍等一下再问！'))
 
         chatgpt_message = chatgpt_message.message
     except Exception as err:
@@ -206,7 +215,7 @@ async def _is_plain_private(event: GroupMessageEvent | PrivateMessageEvent) -> b
     if not isinstance(event, PrivateMessageEvent):
         return False
     text = event.get_plaintext().strip()
-    return bool(text) and not text.startswith(('/', '!', '／', '！', '#'))
+    return (bool(text) or any(s.type in {'image', 'video'} for s in event.get_message())) and not text.startswith(('/', '!', '／', '！', '#'))
 
 
 private_chat = on_message(rule=_is_plain_private, priority=11, block=True)

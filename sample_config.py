@@ -47,7 +47,7 @@ DEEPSEEK_PRICE_INPUT_PER_1M_CACHE_HIT_RMB = 0.2
 DEEPSEEK_PRICE_INPUT_PER_1M_RMB = 2.0
 DEEPSEEK_PRICE_OUTPUT_PER_1M_RMB = 3.0
 
-# Tavily Search API（联网上下文检索）
+# Tavily旧配置兼容字段（不再调用，联网统一使用DeepSeek Search/Fetch）
 # Docs: https://docs.tavily.com/
 TAVILY_API_KEY = ''
 

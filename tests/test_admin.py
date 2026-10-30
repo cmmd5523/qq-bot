@@ -162,7 +162,9 @@ class HelperBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.helper.do('model_select', {'provider': 'kimi'})
         self.helper.do('model_select', {'provider': 'deepseek'})
-        self.assertEqual(self.helper.do('models', {})['selected'], {'provider': 'deepseek', 'model': 'deepseek-flash'})
+        self.assertEqual(self.helper.do('models', {})['selected']['provider'], 'deepseek')
+        self.helper.do('model_select', {'provider': 'deepseek', 'thinking': False})
+        self.assertFalse(self.helper.do('models', {})['models'][0]['thinking'])
 
 
 if __name__ == '__main__':

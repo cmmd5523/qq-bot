@@ -85,6 +85,10 @@ async def clear_context(body: dict):
             mapping.clear() if group == '*' else mapping.pop(group, None)
     summary = group_summary_store._by_group
     summary.clear() if group == '*' else summary.pop(group, None)
+    if group == '*':
+        from Services.deepseek_search import _search_cached, _fetch_cached
+        _search_cached.cache_clear()
+        _fetch_cached.cache_clear()
     # Autonomous windows are keyed by QQ group ID rather than group:<ID>.
     key = group.removeprefix('group:')
     keys = list(p.STATES) if group == '*' else [key]
@@ -104,7 +108,7 @@ async def test_model(body: dict):
     started = time.monotonic()
     try:
         result = await asyncio.wait_for(complete(deepseek_api.client, provider=provider,
-            messages=[{'role': 'user', 'content': '只回复OK。'}], max_tokens=64), timeout=25)
+            thinking=False, messages=[{'role': 'user', 'content': '只回复OK。'}], max_tokens=64), timeout=25)
         if not result.choices[0].message.content:
             raise ValueError('empty response')
         return {'ok': True, 'provider': provider, 'model': PROVIDERS[provider]['model'],

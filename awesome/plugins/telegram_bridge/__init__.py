@@ -12,6 +12,8 @@ from nonebot import logger
 from Services import deepseek_api
 from Services.chatgpt import ChatGPTRequestMessage
 from Services.telegram_access import TelegramAccess, parse_allowed_ids
+from Services.media_input import telegram_parts
+from Services.model_router import selected_provider
 from config import get_system_message
 
 load_dotenv()
@@ -28,7 +30,7 @@ async def _api(client, token, method, **payload):
 
 
 def extract_prompt(message, username, bot_id):
-    text = message.get('text', '')
+    text = message.get('text') or message.get('caption') or ''
     private = message.get('chat', {}).get('type') == 'private'
     addressed = f'@{username}'.lower() in text.lower()
     replied = message.get('reply_to_message', {}).get('from', {}).get('id') == bot_id
@@ -57,13 +59,23 @@ async def _handle_message(client, token, message, me, access):
     if prompt is None:
         return
     chat_id = message['chat']['id']
-    if not prompt:
-        reply = '我是聊天助手。私聊直接发文字，群里 @我 或回复我的消息即可聊天。'
+    media = []
+    try:
+        source = message if any(message.get(k) for k in ('photo', 'video', 'document', 'animation', 'video_note')) else message.get('reply_to_message', {})
+        media = await telegram_parts(source, token,
+            lambda method, **values: _api(client, token, method, **values), selected_provider())
+    except ValueError as error:
+        reply = str(error)
     else:
-        result = await deepseek_api.chat(ChatGPTRequestMessage(
-            message=prompt, is_chat=True, context=get_system_message(),
-            group_id=f'telegram:{chat_id}:{message.get("message_thread_id", 0)}'))
-        reply = str(result.message or '暂时没有得到回复，请稍后再试。')
+        if media and not prompt:
+            prompt = '请描述并分析这段视频。' if any(p['type'] == 'video_url' for p in media) else '请描述并分析这张图片。'
+        if not prompt:
+            reply = '我是聊天助手。私聊直接发送文字、图片，或在选中Kimi后发送视频；群里 @我 或回复我的消息即可。'
+        else:
+            result = await deepseek_api.chat(ChatGPTRequestMessage(
+                message=prompt, is_chat=True, context=get_system_message(), media_parts=media,
+                group_id=f'telegram:{chat_id}:{message.get("message_thread_id", 0)}'))
+            reply = str(result.message or '暂时没有得到回复，请稍后再试。')
     for start in range(0, len(reply), 2000):
         topic = {'message_thread_id': message['message_thread_id']} if message.get('message_thread_id') else {}
         await _api(client, token, 'sendMessage', chat_id=chat_id, text=reply[start:start + 2000], **topic)

@@ -65,4 +65,6 @@ QQ私聊现在直接发送普通文字即可对话，无需唤醒词；已有命
 
 后台新增模型选择页：DeepSeek / deepseek-flash、Kimi / kimi-k2.6（https://api.moonshot.cn/v1）。在私有config.py中填写KIMI_API_KEY，可在后台替换，接口不回显密钥。页面支持独立连接测试和实时设为默认；初始默认保持DeepSeek。文本对话、辅助判断与自主参与跟随选择，搜索/抓取工具仍使用原服务。
 
-Kimi使用关闭思考模式，以匹配当前只保存最终回复的对话格式；不会把推理内容错误拼入历史。Kimi Token及请求数纳入用量，价格未配置时明确标记未计价，不套用DeepSeek单价。模型选择保存在忽略的config/model-routing.json，并纳入私有配置备份。
+Kimi默认快速模式，可在后台开启思考；开启时会在内存中延续相应的思考上下文。Kimi Token及请求数纳入用量，价格未配置时明确标记未计价，不套用DeepSeek单价。模型选择保存在忽略的config/model-routing.json，并纳入私有配置备份。
+
+图片、视频、思考模式与统一联网已接通；功能表及限制见[模型与媒体](docs/模型与媒体.md)。

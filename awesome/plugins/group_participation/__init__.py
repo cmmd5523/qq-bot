@@ -122,7 +122,7 @@ async def consider(bot, group, state):
                 return
             logger.info(f'Autonomous chat candidate: group={group}, score={score}, factors={reasons}')
             completion = await asyncio.wait_for(complete(deepseek_api.client,
-                temperature=0.5, max_tokens=512,
+                thinking=False, temperature=0.5, max_tokens=512,
                 response_format={'type': 'json_object'},
                 messages=[
                     {'role': 'system', 'content': '你是群聊中的中文聊天助手。根据下方近期聊天判断是否值得自然插一句。'

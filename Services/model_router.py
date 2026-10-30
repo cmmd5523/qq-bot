@@ -6,34 +6,65 @@ from openai import AsyncOpenAI
 ROUTING_PATH = Path(__file__).parents[1] / 'config/model-routing.json'
 PROVIDERS = {
     'deepseek': {'name': 'DeepSeek', 'model': 'deepseek-flash',
-                 'base_url': 'https://api.deepseek.com', 'key': 'DEEPSEEK_API_KEY'},
+                 'base_url': 'https://api.deepseek.com', 'key': 'DEEPSEEK_API_KEY',
+                 'images': True, 'video': False, 'thinking_default': True},
     'kimi': {'name': 'Kimi', 'model': 'kimi-k2.6',
-             'base_url': 'https://api.moonshot.cn/v1', 'key': 'KIMI_API_KEY'},
+             'base_url': 'https://api.moonshot.cn/v1', 'key': 'KIMI_API_KEY',
+             'images': True, 'video': True, 'thinking_default': False},
 }
 _CLIENTS = {}
 
 
-def selected_provider():
+class ModelAnswer(str):
+    def __new__(cls, text, reasoning='', provider=''):
+        value = super().__new__(cls, text)
+        value.reasoning_content = reasoning
+        value.reasoning_provider = provider
+        return value
+
+
+def routing_settings():
     try:
         value = json.loads(ROUTING_PATH.read_text(encoding='utf-8'))
     except FileNotFoundError:
-        return 'deepseek'
+        return {'provider': 'deepseek', 'model': 'deepseek-flash'}
     if not isinstance(value, dict) or value.get('provider') not in PROVIDERS:
         raise ValueError('Invalid model selection')
     provider = value['provider']
     if value.get('model') != PROVIDERS[provider]['model']:
         raise ValueError('Invalid provider/model pair')
-    return provider
+    modes = value.get('thinking_by_provider', {})
+    if not isinstance(modes, dict) or any(k not in PROVIDERS or type(v) is not bool for k, v in modes.items()):
+        raise ValueError('Invalid thinking settings')
+    return value
 
 
-async def complete(fallback_client, *, provider=None, **kwargs):
+def selected_provider():
+    return routing_settings()['provider']
+
+
+def thinking_enabled(provider):
+    return routing_settings().get('thinking_by_provider', {}).get(provider, PROVIDERS[provider]['thinking_default'])
+
+
+async def complete(fallback_client, *, provider=None, thinking=None, **kwargs):
     provider = provider or selected_provider()
     if provider not in PROVIDERS:
         raise ValueError('Unsupported model provider')
     item = PROVIDERS[provider]
     kwargs['model'] = item['model']
+    thinking = thinking_enabled(provider) if thinking is None else thinking
+    if type(thinking) is not bool:
+        raise ValueError('Invalid thinking mode')
+    kwargs.setdefault('timeout', 90 if thinking else 45)
+    kwargs['extra_body'] = {**kwargs.get('extra_body', {}), 'thinking': {'type': 'enabled' if thinking else 'disabled'}}
+    # Do not forward another provider's reasoning fields across model switches.
+    kwargs['messages'] = [{k: v for k, v in message.items() if k != 'reasoning_content' or (provider == 'kimi' and thinking)}
+                          for message in kwargs.get('messages', [])]
     if provider == 'deepseek':
         client = fallback_client
+        if thinking:
+            kwargs.pop('temperature', None)
     else:
         import config
         key = getattr(config, item['key'], '')
@@ -45,8 +76,6 @@ async def complete(fallback_client, *, provider=None, **kwargs):
             instrument(client)
             _CLIENTS[provider] = client
         client = _CLIENTS[provider]
-        # K2.6 instant mode matches this bot's existing content-only history format.
-        kwargs['temperature'] = 0.6
-        kwargs['extra_body'] = {**kwargs.get('extra_body', {}), 'thinking': {'type': 'disabled'}}
-        kwargs.setdefault('max_tokens', 4096)
+        kwargs['temperature'] = 1.0 if thinking else 0.6
+        kwargs.setdefault('max_tokens', 8192 if thinking else 4096)
     return await client.chat.completions.create(**kwargs)

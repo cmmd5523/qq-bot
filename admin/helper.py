@@ -23,8 +23,8 @@ KEYS = ('DEEPSEEK_API_KEY', 'KIMI_API_KEY', 'OPEN_API_KEY', 'XAI_API_KEY', 'TAVI
         'PIXIV_REFRESH_TOKEN', 'BILI_SESS_DATA', 'SAUCE_API_KEY', 'DISCORD_AUTH', 'BUFF_SESSION_ID')
 BACKUP_FILES = ('.env', 'config.py', 'system_prompt.md', 'config/group-participation.json', 'config/model-routing.json')
 MODELS = {
-    'deepseek': {'name': 'DeepSeek', 'model': 'deepseek-flash', 'base_url': 'https://api.deepseek.com', 'key': 'DEEPSEEK_API_KEY'},
-    'kimi': {'name': 'Kimi', 'model': 'kimi-k2.6', 'base_url': 'https://api.moonshot.cn/v1', 'key': 'KIMI_API_KEY'},
+    'deepseek': {'name': 'DeepSeek', 'model': 'deepseek-flash', 'base_url': 'https://api.deepseek.com', 'key': 'DEEPSEEK_API_KEY', 'images': True, 'video': False, 'thinking_default': True},
+    'kimi': {'name': 'Kimi', 'model': 'kimi-k2.6', 'base_url': 'https://api.moonshot.cn/v1', 'key': 'KIMI_API_KEY', 'images': True, 'video': True, 'thinking_default': False},
 }
 
 
@@ -146,7 +146,9 @@ def do(action, body):
         selected = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'provider': 'deepseek', 'model': 'deepseek-flash'}
         return {'selected': selected, 'models': [dict(provider=p, name=item['name'], model=item['model'],
                     base_url=item['base_url'], configured=bool(literals().get(item['key'])),
-                    pricing_known=p == 'deepseek') for p, item in MODELS.items()]}
+                    pricing_known=p == 'deepseek', images=item['images'], video=item['video'],
+                    thinking=selected.get('thinking_by_provider', {}).get(p, item['thinking_default'])) for p, item in MODELS.items()],
+                'search_provider': 'DeepSeek Search / Fetch', 'limits': {'images': 4, 'image_mb': 8, 'video_mb': 20, 'video_seconds': 120}}
     if action in {'model_select', 'model_test'}:
         provider = body.get('provider')
         if not isinstance(provider, str) or provider not in MODELS:
@@ -155,7 +157,16 @@ def do(action, body):
             raise ValueError('请先在模型配置中保存该提供商密钥')
         if action == 'model_test':
             return bridge('models/test', {'provider': provider})
-        selected = {'provider': provider, 'model': MODELS[provider]['model']}
+        path = APP / 'config/model-routing.json'
+        current = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+        modes = current.get('thinking_by_provider', {})
+        if not isinstance(modes, dict) or any(k not in MODELS or type(v) is not bool for k, v in modes.items()):
+            raise ValueError('思考模式配置不合法')
+        if 'thinking' in body:
+            if type(body['thinking']) is not bool:
+                raise ValueError('思考模式需为布尔值')
+            modes[provider] = body['thinking']
+        selected = {'provider': provider, 'model': MODELS[provider]['model'], 'thinking_by_provider': modes}
         atomic(APP / 'config/model-routing.json', json.dumps(selected))
         return {'ok': True, 'selected': selected}
     if action == 'status':
@@ -323,6 +334,9 @@ def do(action, body):
             selected = json.loads(values['config/model-routing.json'])
             if not isinstance(selected, dict) or selected.get('provider') not in MODELS or selected.get('model') != MODELS[selected['provider']]['model']:
                 raise ValueError('模型配置不合法')
+            modes = selected.get('thinking_by_provider', {})
+            if not isinstance(modes, dict) or any(k not in MODELS or type(v) is not bool for k, v in modes.items()):
+                raise ValueError('思考模式配置不合法')
         do('backup_create', {})
         run(['docker', 'stop', SERVICES['bot']])
         try:
