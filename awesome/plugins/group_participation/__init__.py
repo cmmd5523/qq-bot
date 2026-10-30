@@ -121,7 +121,8 @@ async def consider(bot, group, state):
                 return
             logger.info(f'Autonomous chat candidate: group={group}, score={score}, factors={reasons}')
             completion = await asyncio.wait_for(deepseek_api.client.chat.completions.create(
-                model='deepseek-flash', temperature=0.5, max_tokens=180,
+                model='deepseek-flash', temperature=0.5, max_tokens=512,
+                response_format={'type': 'json_object'},
                 messages=[
                     {'role': 'system', 'content': '你是群聊中的中文聊天助手。根据下方近期聊天判断是否值得自然插一句。'
                      '仅在能补充有用内容或自然接话时发言；问题已解决、他人对话与你无关、没有把握时保持沉默。'
