@@ -2,6 +2,7 @@
 import asyncio
 import os
 from pathlib import Path
+from time import monotonic
 
 import httpx
 import nonebot
@@ -10,6 +11,7 @@ from nonebot import logger
 
 from Services import deepseek_api
 from Services.chatgpt import ChatGPTRequestMessage
+from Services.telegram_access import TelegramAccess, parse_allowed_ids
 from config import get_system_message
 
 load_dotenv()
@@ -43,7 +45,38 @@ def extract_prompt(message, username, bot_id):
     return text if text else ''
 
 
+async def _handle_message(client, token, message, me, access):
+    # Authorization precedes prompt parsing and every model call, including /start.
+    if not access.authorized(message):
+        notice = access.denial_notice(message, monotonic())
+        if notice:
+            await _api(client, token, 'sendMessage', chat_id=message['chat']['id'], text=notice)
+        return
+    prompt = extract_prompt(message, me['username'], me['id'])
+    logger.info(f'Telegram received: chat_type={message.get("chat", {}).get("type")}, addressed={prompt is not None}')
+    if prompt is None:
+        return
+    chat_id = message['chat']['id']
+    if not prompt:
+        reply = '我是聊天助手。私聊直接发文字，群里 @我 或回复我的消息即可聊天。'
+    else:
+        result = await deepseek_api.chat(ChatGPTRequestMessage(
+            message=prompt, is_chat=True, context=get_system_message(),
+            group_id=f'telegram:{chat_id}:{message.get("message_thread_id", 0)}'))
+        reply = str(result.message or '暂时没有得到回复，请稍后再试。')
+    for start in range(0, len(reply), 2000):
+        topic = {'message_thread_id': message['message_thread_id']} if message.get('message_thread_id') else {}
+        await _api(client, token, 'sendMessage', chat_id=chat_id, text=reply[start:start + 2000], **topic)
+
+
 async def _run(token):
+    try:
+        allowed = parse_allowed_ids(os.getenv('TELEGRAM_ALLOWED_USER_IDS', ''))
+    except ValueError:
+        logger.error('Telegram allowlist invalid; all users denied until configuration is corrected')
+        allowed = frozenset()
+    access = TelegramAccess(allowed)
+    logger.info(f'Telegram allowlist active: {len(allowed)} authorized users; all others denied')
     state = Path('data/telegram-offset.txt')
     offset = int(state.read_text()) if state.exists() else 0
     async with httpx.AsyncClient(timeout=45, proxy=os.getenv('TELEGRAM_PROXY') or None) as client:
@@ -59,20 +92,7 @@ async def _run(token):
                 for update in updates:
                     message = update.get('message', {})
                     if message and not message.get('from', {}).get('is_bot'):
-                        prompt = extract_prompt(message, me['username'], me['id'])
-                        logger.info(f'Telegram received: chat_type={message.get("chat", {}).get("type")}, addressed={prompt is not None}')
-                        if prompt is not None:
-                            chat_id = message['chat']['id']
-                            if not prompt:
-                                reply = '我是聊天助手。私聊直接发文字，群里 @我 或回复我的消息即可聊天。'
-                            else:
-                                result = await deepseek_api.chat(ChatGPTRequestMessage(
-                                    message=prompt, is_chat=True, context=get_system_message(),
-                                    group_id=f'telegram:{chat_id}:{message.get("message_thread_id", 0)}'))
-                                reply = str(result.message or '暂时没有得到回复，请稍后再试。')
-                            for start in range(0, len(reply), 2000):
-                                topic = {'message_thread_id': message['message_thread_id']} if message.get('message_thread_id') else {}
-                                await _api(client, token, 'sendMessage', chat_id=chat_id, text=reply[start:start+2000], **topic)
+                        await _handle_message(client, token, message, me, access)
                     offset = update['update_id'] + 1
                     state.write_text(str(offset))
             except asyncio.CancelledError:
