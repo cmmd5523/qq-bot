@@ -88,7 +88,7 @@ class ModelRoutingTests(unittest.IsolatedAsyncioTestCase):
             await self.router.complete(fallback, provider='https://evil.invalid', messages=[])
         fallback.chat.completions.create.assert_not_called()
 
-    def test_kimi_cost_is_unpriced_and_tokens_preserved(self):
+    def test_kimi_cost_and_historical_backfill(self):
         metrics = load('test_routing_metrics', ROOT / 'Services/admin_metrics.py')
         metrics.DB = Path(self.folder.name) / 'metrics.db'
         usage = SimpleNamespace(prompt_tokens=100, completion_tokens=50,
@@ -100,7 +100,15 @@ class ModelRoutingTests(unittest.IsolatedAsyncioTestCase):
             metrics.record('deepseek-flash', SimpleNamespace(usage=usage), 1.0)
         with sqlite3.connect(metrics.DB) as db:
             rows = db.execute('SELECT provider,prompt,output,cached,cost,pricing_known FROM requests ORDER BY id').fetchall()
-        self.assertEqual(rows[0], ('kimi', 100, 50, 20, None, 0))
+        self.assertEqual(rows[0][:4], ('kimi', 100, 50, 20))
+        self.assertAlmostEqual(rows[0][4], .001892)
+        self.assertEqual(rows[0][5], 1)
+        with sqlite3.connect(metrics.DB) as db:
+            db.execute("UPDATE requests SET cost=NULL,pricing_known=0 WHERE provider='kimi'")
+        self.assertEqual(metrics.backfill_kimi(), 1)
+        self.assertEqual(metrics.backfill_kimi(), 0)
+        with sqlite3.connect(metrics.DB) as db:
+            self.assertAlmostEqual(db.execute("SELECT cost FROM requests WHERE provider='kimi'").fetchone()[0], .001892)
         self.assertEqual(rows[1][:4], ('deepseek', 100, 50, 20))
         self.assertAlmostEqual(rows[1][4], .000314)
 

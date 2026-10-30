@@ -146,7 +146,7 @@ def do(action, body):
         selected = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'provider': 'deepseek', 'model': 'deepseek-flash'}
         return {'selected': selected, 'models': [dict(provider=p, name=item['name'], model=item['model'],
                     base_url=item['base_url'], configured=bool(literals().get(item['key'])),
-                    pricing_known=p == 'deepseek', images=item['images'], video=item['video'],
+                    pricing_known=True, images=item['images'], video=item['video'],
                     thinking=selected.get('thinking_by_provider', {}).get(p, item['thinking_default'])) for p, item in MODELS.items()],
                 'search_provider': 'DeepSeek Search / Fetch', 'limits': {'images': 4, 'image_mb': 8, 'video_mb': 20, 'video_seconds': 120}}
     if action in {'model_select', 'model_test'}:

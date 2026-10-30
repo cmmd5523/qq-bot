@@ -21,8 +21,10 @@ def record(model, response, elapsed, error=None):
             + (prompt - cached) * DEEPSEEK_PRICE_INPUT_PER_1M_RMB
             + output * DEEPSEEK_PRICE_OUTPUT_PER_1M_RMB) / 1_000_000
     provider = 'kimi' if str(model).startswith('kimi') else 'deepseek'
-    priced = provider == 'deepseek'
-    if not priced:
+    priced = provider == 'deepseek' or str(model) == 'kimi-k2.6'
+    if str(model) == 'kimi-k2.6':
+        cost = (cached * 1.10 + (prompt - cached) * 6.50 + output * 27.00) / 1_000_000
+    elif not priced:
         cost = None
     with sqlite3.connect(DB, timeout=3) as db:
         db.execute('''CREATE TABLE IF NOT EXISTS requests (
@@ -35,6 +37,16 @@ def record(model, response, elapsed, error=None):
             db.execute('ALTER TABLE requests ADD COLUMN pricing_known INTEGER DEFAULT 1')
         db.execute('INSERT INTO requests(at,model,prompt,output,cached,cost,elapsed,error,provider,pricing_known) VALUES(?,?,?,?,?,?,?,?,?,?)',
                    (time.time(), str(model)[:80], prompt, output, cached, cost, elapsed, error, provider, int(priced)))
+
+
+def backfill_kimi():
+    """Price previously unpriced K2.6 requests using recorded token counts."""
+    if not DB.exists():
+        return 0
+    with sqlite3.connect(DB, timeout=10) as db:
+        return db.execute("""UPDATE requests SET
+            cost=(cached*1.10+(prompt-cached)*6.50+output*27.00)/1000000.0,
+            pricing_known=1 WHERE model='kimi-k2.6' AND pricing_known=0""").rowcount
 
 
 def instrument(client):
